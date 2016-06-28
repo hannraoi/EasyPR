@@ -14,7 +14,10 @@
 
 #include "easypr/core/chars_segment.h"
 #include "easypr/core/chars_identify.h"
+#include "easypr/core/character.hpp"
 #include "easypr/util/util.h"
+#include "easypr/core/plate.hpp"
+#include "easypr/config.h"
 
 namespace easypr {
 
@@ -25,6 +28,7 @@ class CCharsRecognise {
   ~CCharsRecognise();
 
   int charsRecognise(cv::Mat plate, std::string& plateLicense);
+  int charsRecognise(CPlate& plate, std::string& plateLicense);
 
   //! 获得车牌颜色
 
@@ -37,7 +41,7 @@ class CCharsRecognise {
     color = utils::utf8_to_gbk(color.c_str());
 #endif
     return color;
-  }
+  } 
 
   //! 设置变量
 

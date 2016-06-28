@@ -48,7 +48,6 @@ void CPlateLocate::setLifemode(bool param) {
 }
 
 //! 对minAreaRect获得的最小外接矩形，用纵横比进行判断
-
 bool CPlateLocate::verifySizes(RotatedRect mr) {
   float error = m_error;
   // Spain car plate size: 52x11 aspect 4,7272
@@ -80,8 +79,320 @@ bool CPlateLocate::verifySizes(RotatedRect mr) {
     return true;
 }
 
-// !基于HSV空间的颜色搜索方法
+//! mser search method
+int CPlateLocate::mserSearch(const Mat &src, const Color color, Mat &out,
+  vector<CPlate>& out_plateVec, int img_index, bool showDebug) {
+  Mat match_grey;
 
+  vector<CPlate> plateVec;
+  //mserMatch(src, match_grey, r, plateRects, charRects);
+  mserCharMatch(src, match_grey, plateVec, color, img_index, showDebug);
+
+  //calculet avg dist
+  /*float sumdist = 0, avgdist = 0;
+  for (auto plate : plateVec) {
+    Vec2i disV = plate.getPlateDistVec();
+    sumdist += (float)disV[0];
+  }
+
+  avgdist = sumdist / (float)plateVec.size();
+  
+  const int mser_morph_width = (int)avgdist;
+  const int mser_morph_height = int(avgdist / 5);
+
+  Mat src_threshold;
+  threshold(match_grey, src_threshold, 0, 255, CV_THRESH_OTSU + CV_THRESH_BINARY);
+  
+  Mat element = getStructuringElement(MORPH_RECT, Size(mser_morph_width, mser_morph_height));
+    morphologyEx(src_threshold, src_threshold, MORPH_CLOSE, element);*/
+
+  Mat src_threshold = match_grey.clone();
+
+  vector<RotatedRect> mergeRects;
+  vector<vector<Point>> contours;
+
+  findContours(src_threshold,
+      contours,               // a vector of contours
+      CV_RETR_EXTERNAL,
+      CV_CHAIN_APPROX_NONE);  // all pixels of each contours
+  
+    vector<vector<Point>>::iterator itc = contours.begin();
+    while (itc != contours.end()) {
+      RotatedRect mr = minAreaRect(Mat(*itc));
+  
+      // 需要进行大小尺寸判断
+      if (!verifyRotatedPlateSizes(mr))
+        itc = contours.erase(itc);
+      else {
+        ++itc;
+        //contourRects.push_back(mr);
+  
+        float width = mr.size.width;
+        float height = mr.size.height;     
+  
+        RotatedRect candRect(mr.center,
+          Size2f(float(width * 1.15), float(height * 1.25)), mr.angle);
+  
+        //mergeRects.push_back(candRect);      
+      }
+    }
+
+    for (auto plate : plateVec) {
+      RotatedRect rrect = plate.getPlatePos();
+      Rect_<float> rectSrc;
+      calcSafeRect(rrect, src, rectSrc);
+      double maxr = 0;
+      RotatedRect similyRect;
+      for (auto mergeRect : mergeRects) {
+        Rect_<float> rectComp;
+        calcSafeRect(mergeRect, src, rectComp);
+
+        Rect rectInter = rectSrc & rectComp;
+        Rect rectUnion = rectSrc | rectComp;
+        double r = double(rectInter.area()) / double(rectUnion.area()); 
+        if (r > maxr){
+          maxr = r;
+          similyRect = mergeRect;
+        }
+      }
+      if (maxr > 0.5){
+        plate.setPlatePos(similyRect);
+      }
+    }
+
+    for (auto plate : plateVec){
+      RotatedRect rrect = plate.getPlatePos();
+      rotatedRectangle(match_grey, rrect, Scalar(255));
+    }
+
+    if (0) {
+      imshow("match", match_grey);
+      waitKey(0);
+      destroyWindow("match");
+    }
+  
+    out_plateVec = plateVec;
+    out = match_grey;
+
+  return 0;
+}
+
+
+// 
+//int mserSearch2(const Mat &src, const Color color, Mat &out,
+//  vector<RotatedRect> &outRects, int index, bool showDebug) {
+//  Mat match_grey;
+//  Mat result = src.clone();
+//  cvtColor(result, result, COLOR_GRAY2BGR);
+//
+//  const int color_morph_width = 24;
+//  const int color_morph_height = 4;
+//
+//  std::vector<RotatedRect> plateRects;
+//  std::vector<Rect> charRects;
+//  std::vector<RotatedRect> contourRects;
+//
+//  std::vector<Rect> mergedRects;
+//
+//  // 进行颜色查找
+//
+//  //mserMatch(src, match_grey, r, plateRects, charRects);
+//  mserCharMatch(src, match_grey, plateRects, color, index, showDebug);
+//
+//
+//  if (0) {
+//    utils::imwrite("resources/image/tmp/match_grey.jpg", match_grey);
+//  }
+//
+//  if (0) {
+//    imshow("match_grey", match_grey);
+//    waitKey(0);
+//    destroyWindow("match_grey");
+//  }
+//
+//  Mat src_threshold;
+//  threshold(match_grey, src_threshold, 0, 255,
+//    CV_THRESH_OTSU + CV_THRESH_BINARY);
+//
+//  Mat element = getStructuringElement(
+//    MORPH_RECT, Size(color_morph_width, color_morph_height));
+//  morphologyEx(src_threshold, src_threshold, MORPH_CLOSE, element);
+//
+//  if (0) {
+//    utils::imwrite("resources/image/tmp/mser.jpg", src_threshold);
+//  }
+//
+//
+//  if (0) {
+//    imshow("src_threshold", src_threshold);
+//    waitKey(0);
+//    destroyWindow("src_threshold");
+//  }
+//
+//  src_threshold.copyTo(out);
+//
+//  // 查找轮廓
+//
+//  vector<vector<Point>> contours;
+//
+//  // 注意，findContours会改变src_threshold
+//  // 因此要输出src_threshold必须在这之前使用copyTo方法
+//
+//  findContours(src_threshold,
+//    contours,               // a vector of contours
+//    CV_RETR_EXTERNAL,
+//    CV_CHAIN_APPROX_NONE);  // all pixels of each contours
+//
+//  vector<vector<Point>>::iterator itc = contours.begin();
+//  while (itc != contours.end()) {
+//    RotatedRect mr = minAreaRect(Mat(*itc));
+//
+//    // 需要进行大小尺寸判断
+//    if (!verifyRotatedPlateSizes(mr))
+//      itc = contours.erase(itc);
+//    else {
+//      ++itc;
+//      contourRects.push_back(mr);
+//
+//      float width = mr.size.width;
+//      float height = mr.size.height;     
+//
+//      RotatedRect candRect(mr.center,
+//        Size2f(float(width * 1.05), float(height * 1.1)), mr.angle);
+//
+//      outRects.push_back(candRect);
+//
+//      Rect_<float> outputRect;
+//      calcSafeRect(candRect, src, outputRect);
+//
+//      cv::rectangle(result, outputRect, Scalar(0, 0, 255));
+//      mergedRects.push_back(outputRect);
+//      if (0) {
+//        imshow("outputRect", src(outputRect));
+//        waitKey(0);
+//      }
+//    }
+//  }
+//
+//
+//  for (auto mergeRect : mergedRects) {
+//    std::vector<Point> points;
+//    Vec4f line;
+//
+//    int maxarea = 0;
+//    Rect maxrect;
+//
+//    for (auto charRect : charRects) {
+//      Rect interRect = mergeRect & charRect;
+//
+//      if (interRect == charRect) {
+//
+//        Point center(charRect.tl().x + charRect.width / 2, charRect.tl().y + charRect.height / 2);
+//        points.push_back(center);
+//
+//        cv::circle(result, center, 3, Scalar(0, 255, 0), 2);
+//        if (charRect.area() - maxarea > 0.1f) {
+//          maxrect = charRect;
+//          maxarea = charRect.area();
+//        }
+//      }       
+//    }
+//
+//    if (points.size() < 5)
+//      continue;
+//
+//    int left = mergeRect.tl().x - maxrect.width / 8 * 9;
+//    left = left > 0 ? left : 0;
+//    int right = mergeRect.br().x + maxrect.width / 8;
+//    right = right + maxrect.width < src_threshold.cols - 1 ? right : src_threshold.cols - (maxrect.width + 1);
+//
+//    fitLine(Mat(points), line, CV_DIST_L2, 0, 0.01, 0.01);
+//    float k = line[1] / line[0];
+//    float step = 100;
+//    cv::line(result, Point2f(line[2] - step, line[3] - k*step), Point2f(line[2] + step, k*step + line[3]), Scalar(255, 255, 255));
+//
+//    Point2f leftPoint((float)left, k * (left - line[2]) + line[3]);
+//    Point2f rightPoint((float)right, k * (right - line[2]) + line[3]);
+//
+//    Rect leftRect(Point2f(leftPoint.x, leftPoint.y - maxrect.height / 2), maxrect.size());
+//    Rect rightRect(Point2f(rightPoint.x, rightPoint.y - maxrect.height / 2), maxrect.size());
+//
+//    cv::rectangle(result, leftRect, Scalar(255, 255, 0));
+//    cv::rectangle(result, rightRect, Scalar(255, 255, 0));
+//
+//    /*vector<Mat> slideMat;
+//
+//    int steplength = maxrect.width;
+//    for (int step = - steplength / 2; step < steplength / 2; step++) {
+//      int rightx = right + step;
+//      Point2f rightPoint((float)rightx, k * (rightx - line[2]) + line[3]);
+//      Rect slideRightRect(Point2f(rightPoint.x, rightPoint.y - maxrect.height / 2), maxrect.size());
+//
+//      Mat region = grayImage(slideRightRect);
+//      Mat binary_region;
+//      threshold(region, binary_region, 0, 255, CV_THRESH_BINARY | CV_THRESH_OTSU);
+//
+//      Mat charInput = preprocessChar(binary_region, 20);
+//
+//      slideMat.push_back(charInput);
+//    }*/
+//  }
+//
+//
+//  for (auto prect : plateRects) {
+//    outRects.push_back(prect);
+//
+//    Rect_<float> outputRect;
+//    calcSafeRect(prect, src, outputRect);
+//
+//    cv::rectangle(result, outputRect, Scalar(0, 0, 255));
+//
+//    if (0) {
+//      imshow("outputRect", src(outputRect));
+//      waitKey(0);
+//    }
+//    //for (auto rrect : contourRects) {
+//    //  Rect rect = prect.boundingRect();
+//    //  Rect interRect = rect & rrect.boundingRect();
+//    //  Rect unionRect = rect | rrect.boundingRect();
+//    //  double ratio = (double)interRect.area() / (double)unionRect.area();
+//    //  
+//    //  if (unionRect == rect && ratio > 0.618) {
+//    //    std::cout << "ratio:" << ratio << std::endl;
+//    //    float x = (float)rect.tl().x;
+//    //    float y = (float)rect.tl().y;
+//    //    float width = (float)rect.width;
+//    //    float height = (float)rect.height;
+//    //    RotatedRect candRect(Point2f(float(x + width / 2), float(y + height / 2)),
+//    //      Size2f(float(width), float(height)), 0);
+//
+//    //    Rect_<float> outputRect;
+//    //    calcSafeRect(candRect, src, outputRect);
+//
+//    //    cv::rectangle(result, outputRect, Scalar(0, 255, 0));
+//
+//    //    if (0) {
+//    //      imshow("outputRect", src(outputRect));
+//    //      waitKey(0);
+//    //    }
+//
+//    //    outRects.push_back(candRect);
+//    //  }
+//    //    
+//    //}
+//  }
+//
+//  if (0) {
+//    imshow("result", result);
+//    waitKey(0);
+//  }
+//
+//
+//  return 0;
+//}
+
+
+// !基于HSV空间的颜色搜索方法
 int CPlateLocate::colorSearch(const Mat &src, const Color r, Mat &out,
                               vector<RotatedRect> &outRects, int index) {
   Mat match_grey;
@@ -451,6 +762,10 @@ int CPlateLocate::deskew(const Mat &src, const Mat &src_b,
              Scalar(0, 255, 255), 1, 8);
     }
 
+    // changed
+    // rotation = 90 - abs(roi_angle);
+    // rotation < m_angel;
+
     // m_angle=60
     if (roi_angle - m_angle < 0 && roi_angle + m_angle > 0) {
       Rect_<float> safeBoundRect;
@@ -496,12 +811,10 @@ int CPlateLocate::deskew(const Mat &src, const Mat &src_b,
       plate_mat.create(HEIGHT, WIDTH, TYPE);
 
       // haitungaga添加，删除非区域，这个函数影响了25%的完整定位率
-
-      DeleteNotArea(deskew_mat);
+      // DeleteNotArea(deskew_mat);
 
       // 这里对deskew_mat进行了一个筛选
       // 使用了经验数值：2.3和6
-
 
       if (deskew_mat.cols * 1.0 / deskew_mat.rows > 2.3 &&
           deskew_mat.cols * 1.0 / deskew_mat.rows < 6) {
@@ -516,6 +829,13 @@ int CPlateLocate::deskew(const Mat &src, const Mat &src_b,
         CPlate plate;
         plate.setPlatePos(roi_rect);
         plate.setPlateMat(plate_mat);
+
+        if (1) {
+          imshow("plate_mat", plate_mat);
+          waitKey(0);
+          destroyWindow("plate_mat");
+        }
+
         outPlates.push_back(plate);
       }
     }
@@ -705,36 +1025,6 @@ void CPlateLocate::affine(const Mat &in, Mat &out, const double slope) {
 //! 计算一个安全的Rect
 //! 如果不存在，返回false
 
-bool CPlateLocate::calcSafeRect(const RotatedRect &roi_rect, const Mat &src,
-                                Rect_<float> &safeBoundRect) {
-  Rect_<float> boudRect = roi_rect.boundingRect();
-
-  // boudRect的左上的x和y有可能小于0
-
-  float tl_x = boudRect.x > 0 ? boudRect.x : 0;
-  float tl_y = boudRect.y > 0 ? boudRect.y : 0;
-
-  // boudRect的右下的x和y有可能大于src的范围
-
-  float br_x = boudRect.x + boudRect.width < src.cols
-               ? boudRect.x + boudRect.width - 1
-               : src.cols - 1;
-  float br_y = boudRect.y + boudRect.height < src.rows
-               ? boudRect.y + boudRect.height - 1
-               : src.rows - 1;
-
-  float roi_width = br_x - tl_x;
-  float roi_height = br_y - tl_y;
-
-  if (roi_width <= 0 || roi_height <= 0) return false;
-
-  // 新建一个mat，确保地址不越界，以防mat定位roi时抛异常
-
-  safeBoundRect = Rect_<float>(tl_x, tl_y, roi_width, roi_height);
-
-  return true;
-}
-
 // !基于颜色信息的车牌定位
 
 int CPlateLocate::plateColorLocate(Mat src, vector<CPlate> &candPlates,
@@ -761,6 +1051,98 @@ int CPlateLocate::plateColorLocate(Mat src, vector<CPlate> &candPlates,
   for (size_t i = 0; i < plates.size(); i++) {
     candPlates.push_back(plates[i]);
   }
+  return 0;
+}
+
+
+//! MSER plate locate
+
+int CPlateLocate::plateMserLocate(Mat src, vector<CPlate> &candPlates, int img_index) {
+  std::vector<Mat> channelImages;
+  std::vector<Color> flags;
+
+  // only conside blue plate
+  if (1) {
+    Mat grayImage;
+    cvtColor(src, grayImage, COLOR_BGR2GRAY);
+    channelImages.push_back(grayImage);
+    flags.push_back(BLUE);
+
+    //Mat singleChannelImage;
+    //extractChannel(src, singleChannelImage, 2);
+    //channelImages.push_back(singleChannelImage);
+    //flags.push_back(BLUE);
+
+    channelImages.push_back(255 - grayImage);
+    flags.push_back(YELLOW);
+  }
+
+  int scale_size = 1024;
+  double scale_ratio = 1;
+
+  for (size_t i = 0; i < channelImages.size(); ++i) {
+    vector<RotatedRect> rects_mser;
+    vector<CPlate> plates;
+    Mat src_b;
+
+    Mat channelImage = channelImages.at(i);
+    Color color = flags.at(i);
+    Mat image = scaleImage(channelImage, Size(scale_size, scale_size), scale_ratio);
+
+    // vector<RotatedRect> rects;
+    mserSearch(image, color, src_b, plates, img_index);
+
+    // deskew for rotation and slope image
+    /*for (auto plate : plates) {
+      RotatedRect rrect = plate.getPlatePos();
+      rects_mser.push_back(rrect);
+    }
+    deskew(image, src_b, rects_mser, candPlates);*/
+
+    // no deskew
+    for (size_t j = 0; j < plates.size(); ++j) {
+      CPlate plate = plates.at(j);
+      RotatedRect rrect = plate.getPlatePos();
+      RotatedRect scaleRect = scaleBackRRect(rrect, (float)scale_ratio);
+      plate.setPlatePos(scaleRect);
+
+      Rect_<float> outputRect;
+      calcSafeRect(scaleRect, src, outputRect);
+
+      Mat plate_mat;
+      plate_mat.create(HEIGHT, WIDTH, TYPE);
+
+      resize(src(outputRect), plate_mat, plate_mat.size(), 0, 0, INTER_AREA);
+
+      plate.setPlateMat(plate_mat);
+
+      candPlates.push_back(plate);
+    }
+  }
+
+  //for (size_t i = 0; i < rects_mser.size(); ++i) {
+  //  Rect_<float> outputRect;
+  //  calcSafeRect(rects_mser[i], src, outputRect);
+
+  //  if (0) {
+  //    std::stringstream ss(std::stringstream::in | std::stringstream::out);
+  //    ss << "resources/image/tmp/plate_" << i << ".jpg";
+  //    imwrite(ss.str(), src(outputRect));
+  //  }
+
+  //  CPlate plate;
+  //  plate.setPlateLocateType(CMSER);
+  //  plate.setPlateMat(src(outputRect));
+  //  plate.setPlatePos(rects_mser[i]);
+  //  candPlates.push_back(plate);
+  //}
+
+  //deskew(src, src_b, rects_mser_blue, plates);
+
+  //for (size_t i = 0; i < plates.size(); i++) {
+  //  candPlates.push_back(plates[i]);
+  //}
+
   return 0;
 }
 
